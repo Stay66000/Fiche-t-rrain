@@ -23,4 +23,11 @@ drop policy if exists profiles_update_own on public.profiles;
 create policy profiles_update_own on public.profiles for update to authenticated
 using ((select auth.uid()) = id)
 with check ((select auth.uid()) = id);
+-- Fonction d’événement éventuellement créée par l’option Supabase RLS automatique.
+-- Réserver son exécution aux rôles administratifs.
+do $$ begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke execute on function public.rls_auto_enable() from public, anon, authenticated';
+  end if;
+end $$;
 commit;
