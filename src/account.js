@@ -5,8 +5,53 @@ const $ = selector => document.querySelector(selector);
 const config = window.FICHE_CONFIG;
 const dialog = $('#account-dialog');
 const enabled = configIsReady(config);
+const REMEMBER_KEY = 'fiche-terrain-remember';
+const AUTH_STORAGE_KEY = 'fiche-terrain-auth';
+const volatileStorage = new Map();
+
+function safeRead(store, key) {
+  try { return store?.getItem(key) ?? null; } catch { return null; }
+}
+function safeWrite(store, key, value) {
+  try { store?.setItem(key, value); return true; } catch { return false; }
+}
+function safeRemove(store, key) {
+  try { store?.removeItem(key); } catch { /* Storage can be unavailable in strict privacy modes. */ }
+}
+function rememberSession() {
+  return safeRead(window.localStorage, REMEMBER_KEY) !== '0';
+}
+function setRememberSession(value) {
+  safeWrite(window.localStorage, REMEMBER_KEY, value ? '1' : '0');
+}
+function preferredStorage() {
+  return rememberSession() ? [window.localStorage, window.sessionStorage] : [window.sessionStorage, window.localStorage];
+}
+const authStorage = {
+  getItem(key) {
+    const [primary, secondary] = preferredStorage();
+    return safeRead(primary, key) ?? safeRead(secondary, key) ?? volatileStorage.get(key) ?? null;
+  },
+  setItem(key, value) {
+    const [primary, secondary] = preferredStorage();
+    if (safeWrite(primary, key, value)) volatileStorage.delete(key);
+    else volatileStorage.set(key, value);
+    safeRemove(secondary, key);
+  },
+  removeItem(key) {
+    safeRemove(window.localStorage, key);
+    safeRemove(window.sessionStorage, key);
+    volatileStorage.delete(key);
+  }
+};
 const client = enabled ? createClient(config.supabaseUrl, config.supabasePublishableKey, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'fiche-terrain-auth' }
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storageKey: AUTH_STORAGE_KEY,
+    storage: authStorage
+  }
 }) : null;
 const profiles = client ? createProfileStore(client) : null;
 let currentUser = null;
@@ -34,7 +79,7 @@ function updateAccountUI() {
   $('#account-open').textContent = currentUser ? 'Mon profil' : 'Se connecter';
   $('#account-banner-title').textContent = currentUser ? 'Votre profil vous accompagne.' : 'Votre équipe, déjà renseignée.';
   $('#account-banner-description').textContent = currentUser
-    ? (currentProfile ? 'Entreprise et équipe préremplies. Vous pouvez les adapter pour cette fiche.' : 'Complétez votre profil pour préremplir vos prochaines fiches.')
+    ? (currentProfile ? 'Entreprise et équipe préremplies. Vous restez connecté sur cet appareil jusqu’à votre déconnexion.' : 'Complétez votre profil pour préremplir vos prochaines fiches.')
     : 'Un compte gratuit pour retrouver votre entreprise et votre équipe à chaque visite.';
   $('#account-start').textContent = currentUser ? 'Modifier mon profil' : 'Créer mon compte';
   $('#use-profile').hidden = !currentProfile;
@@ -54,11 +99,12 @@ function fillProfile(overwrite = false) {
 function forgetLocalProfile() {
   currentUser = null;
   currentProfile = null;
-  const sheet = $('#sheet');
-  sheet.elements.entreprise.value = '';
-  sheet.elements.equipe.value = '';
-  sheet.dispatchEvent(new Event('input', { bubbles: true }));
   updateAccountUI();
+}
+function setRememberFromForm(form) {
+  const remember = form.elements.remember ? form.elements.remember.checked : true;
+  setRememberSession(remember);
+  for (const checkbox of dialog.querySelectorAll('input[name="remember"]')) checkbox.checked = remember;
 }
 async function syncProfile() {
   if (!client) return;
@@ -69,7 +115,10 @@ async function syncProfile() {
     try {
       const { data: sessionData, error: sessionError } = await client.auth.getSession();
       if (sessionError) throw sessionError;
-      if (!sessionData.session) return;
+      if (!sessionData.session) {
+        if (generation === revision && currentUser) forgetLocalProfile();
+        return;
+      }
       const { data: userData, error: userError } = await client.auth.getUser();
       if (userError) throw userError;
       if (!userData.user || generation !== revision) return;
@@ -110,6 +159,12 @@ async function run(form, operation) {
   finally { fieldset.disabled = false; form.removeAttribute('aria-busy'); }
 }
 
+for (const checkbox of dialog.querySelectorAll('input[name="remember"]')) {
+  checkbox.checked = rememberSession();
+  checkbox.addEventListener('change', () => {
+    for (const other of dialog.querySelectorAll('input[name="remember"]')) other.checked = checkbox.checked;
+  });
+}
 $('#account-open').addEventListener('click', () => panel(recovery ? 'recovery' : currentUser ? 'profile' : 'login'));
 $('#account-start').addEventListener('click', () => panel(currentUser ? 'profile' : 'signup'));
 $('#account-close').addEventListener('click', () => dialog.close());
@@ -124,6 +179,7 @@ $('#signup-form').addEventListener('submit', event => {
   event.preventDefault();
   const form = event.currentTarget;
   run(form, async () => {
+    setRememberFromForm(form);
     const profile = normalizeProfile({ entreprise: form.elements.entreprise.value, equipe: form.elements.equipe.value });
     const { data, error } = await client.auth.signUp({
       email: form.elements.email.value.trim(), password: form.elements.password.value,
@@ -131,6 +187,7 @@ $('#signup-form').addEventListener('submit', event => {
     });
     if (error) throw error;
     form.reset();
+    for (const checkbox of dialog.querySelectorAll('input[name="remember"]')) checkbox.checked = rememberSession();
     if (data.session) {
       await syncProfile();
       if (currentProfile) dialog.close();
@@ -144,6 +201,7 @@ $('#login-form').addEventListener('submit', event => {
   event.preventDefault();
   const form = event.currentTarget;
   run(form, async () => {
+    setRememberFromForm(form);
     const { error } = await client.auth.signInWithPassword({ email: form.elements.email.value.trim(), password: form.elements.password.value });
     if (error) throw error;
     form.elements.password.value = '';
