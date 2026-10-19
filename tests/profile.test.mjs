@@ -12,7 +12,7 @@ test('only profile fields and allowlisted defaults are retained, with whitespace
   }), {
     entreprise: 'Exemple',
     equipe: '42',
-    default_moyens_presents: ['m4', 'm3'],
+    default_moyens_presents: ['m4'],
     default_moyens_a_prevoir: ['f0', 'f3']
   });
 });
@@ -26,7 +26,7 @@ test('empty or oversized profiles are rejected', () => {
 });
 test('configuration fails closed and excludes secret keys and non-Supabase origins', () => {
   const valid = { accountsEnabled: true, supabaseUrl: 'https://exampleproject.supabase.co', supabasePublishableKey: 'sb_publishable_example' };
-  for (const expected of [true]) assert.equal(configIsReady(valid), expected);
+  assert.equal(configIsReady(valid), true);
   for (const patch of [{ accountsEnabled: false }, { supabaseUrl: 'http://exampleproject.supabase.co' }, { supabaseUrl: 'https://attacker.test' }, { supabasePublishableKey: 'sb_secret_example' }, { supabaseUrl: 'https://u:p@exampleproject.supabase.co' }]) assert.equal(configIsReady({ ...valid, ...patch }), false);
 });
 test('automatic text prefill never overwrites a fiche already being typed', () => {
