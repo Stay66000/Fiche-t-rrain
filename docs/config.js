@@ -3,5 +3,5 @@
 window.FICHE_CONFIG = Object.freeze({
   supabaseUrl: 'https://mvgikkhcxidcirdxwyna.supabase.co',
   supabasePublishableKey: 'sb_publishable_LhC93s0CU2vrAH0MUjdAxw_lLLpL47l',
-  accountsEnabled: false
+  accountsEnabled: true
 });
