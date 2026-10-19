@@ -1,0 +1,56 @@
+name: Build static site
+
+on:
+  push:
+    paths:
+      - 'public/**'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/build-site.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-static-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build static site
+        run: npm run build
+
+      - name: Commit generated site when needed
+        shell: bash
+        run: |
+          if git diff --quiet -- docs index.html .nojekyll; then
+            echo "Generated site is already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs index.html .nojekyll
+          git commit -m "chore: rebuild static site"
+          git push
