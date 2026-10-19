@@ -25,11 +25,11 @@ npm run build
 
 ## Hébergement GitHub Pages gratuit
 
-Dans **Settings → Pages**, choisir **Deploy from a branch**, branche **main**, dossier **/docs**, puis **Save**. Le site attendu est :
+Dans **Settings → Pages**, choisir **Deploy from a branch**, branche **main**, dossier **/(root)**, puis **Save**. Le site attendu est :
 
 https://Stay66000.github.io/Fiche-t-rrain/
 
-Cette adresse n’est disponible qu’après activation et publication réussie de GitHub Pages. Après une modification, reconstruire avec `npm run build`, puis committer aussi `docs/`.
+Cette adresse n’est disponible qu’après activation et publication réussie de GitHub Pages. Après une modification, reconstruire avec `npm run build`, puis committer aussi `docs/` et le fichier `index.html` généré à la racine. Le dossier `/docs` peut également servir directement de source Pages.
 
 ## Activer les comptes
 

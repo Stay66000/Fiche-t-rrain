@@ -1,7 +1,10 @@
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 await rm('docs', { recursive: true, force: true });
 await mkdir('docs', { recursive: true });
 await cp('public', 'docs', { recursive: true });
 await build({ entryPoints: ['src/account.js'], bundle: true, format: 'esm', target: ['es2022'], outfile: 'docs/account.js', minify: true, legalComments: 'eof' });
-console.log('Site statique généré dans docs/.');
+const html = await readFile('docs/index.html', 'utf8');
+await writeFile('index.html', html.replace('<head>', '<head><base href="./docs/">').replace('class="brand" href="./"', 'class="brand" href="../"'));
+await writeFile('.nojekyll', '');
+console.log('Site statique généré dans docs/ avec un point d’entrée à la racine.');
