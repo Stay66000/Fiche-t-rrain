@@ -1,5 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
-import { configIsReady, createProfileStore, friendlyError, normalizeProfile, profileFieldsToFill } from './profile.js';
+import {
+  configIsReady,
+  createProfileStore,
+  DEFAULT_FUTURE_OPTIONS,
+  DEFAULT_PRESENT_OPTIONS,
+  friendlyError,
+  normalizeProfile,
+  profileFieldsToFill
+} from './profile.js';
 
 const $ = selector => document.querySelector(selector);
 const config = window.FICHE_CONFIG;
@@ -75,12 +83,19 @@ function panel(mode, open = true) {
   if (!enabled) message('Les comptes sont en cours d’activation. Vous pouvez déjà remplir et télécharger votre fiche sans compte.');
   if (open && !dialog.open) dialog.showModal();
 }
+function selectedValues(form, name) {
+  return Array.from(form.querySelectorAll(`input[name="${name}"]:checked`), input => input.value);
+}
+function setSelectedValues(form, name, values = []) {
+  const selected = new Set(values);
+  for (const input of form.querySelectorAll(`input[name="${name}"]`)) input.checked = selected.has(input.value);
+}
 function updateAccountUI() {
   $('#account-open').textContent = currentUser ? 'Mon profil' : 'Se connecter';
   $('#account-banner-title').textContent = currentUser ? 'Votre profil vous accompagne.' : 'Votre équipe, déjà renseignée.';
   $('#account-banner-description').textContent = currentUser
-    ? (currentProfile ? 'Entreprise et équipe préremplies. Vous restez connecté sur cet appareil jusqu’à votre déconnexion.' : 'Complétez votre profil pour préremplir vos prochaines fiches.')
-    : 'Un compte gratuit pour retrouver votre entreprise et votre équipe à chaque visite.';
+    ? (currentProfile ? 'Entreprise, équipe et moyens habituels prêts pour vos nouvelles fiches. Vous restez connecté sur cet appareil jusqu’à votre déconnexion.' : 'Complétez votre profil pour préremplir vos prochaines fiches.')
+    : 'Un compte gratuit pour retrouver votre entreprise, votre équipe et vos moyens habituels à chaque visite.';
   $('#account-start').textContent = currentUser ? 'Modifier mon profil' : 'Créer mon compte';
   $('#use-profile').hidden = !currentProfile;
   $('#account-connection-status').textContent = currentUser ? 'Connecté' : (enabled ? 'Compte facultatif' : 'Comptes bientôt disponibles');
@@ -88,12 +103,38 @@ function updateAccountUI() {
   const form = $('#profile-form');
   form.elements.entreprise.value = currentProfile?.entreprise || '';
   form.elements.equipe.value = currentProfile?.equipe || '';
+  setSelectedValues(form, 'default_moyens_presents', currentProfile?.default_moyens_presents);
+  setSelectedValues(form, 'default_moyens_a_prevoir', currentProfile?.default_moyens_a_prevoir);
 }
-function fillProfile(overwrite = false) {
+function applyDefaultOptions(overwrite = false) {
+  if (!currentProfile) return;
+  const sheet = $('#sheet');
+  const groups = [
+    { names: DEFAULT_PRESENT_OPTIONS, selected: currentProfile.default_moyens_presents || [] },
+    { names: DEFAULT_FUTURE_OPTIONS, selected: currentProfile.default_moyens_a_prevoir || [] }
+  ];
+  for (const group of groups) {
+    const alreadyChosen = group.names.some(name => sheet.elements.namedItem(name)?.checked);
+    if (!overwrite && alreadyChosen) continue;
+    if (overwrite) {
+      for (const name of group.names) {
+        const input = sheet.elements.namedItem(name);
+        if (input) input.checked = false;
+      }
+    }
+    for (const name of group.selected) {
+      const input = sheet.elements.namedItem(name);
+      if (input) input.checked = true;
+    }
+  }
+  sheet.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function fillProfile(overwrite = false, includeDefaults = false) {
   if (!currentProfile) return;
   const sheet = $('#sheet');
   const values = profileFieldsToFill({ entreprise: sheet.elements.entreprise.value, equipe: sheet.elements.equipe.value }, currentProfile, overwrite);
   for (const [key, value] of Object.entries(values)) sheet.elements[key].value = value;
+  if (includeDefaults) applyDefaultOptions(overwrite);
   sheet.dispatchEvent(new Event('input', { bubbles: true }));
 }
 function forgetLocalProfile() {
@@ -135,7 +176,7 @@ async function syncProfile() {
       currentUser = loaded.user;
       currentProfile = loaded.profile;
       updateAccountUI();
-      fillProfile();
+      fillProfile(false, true);
       if (!currentProfile && !recovery) panel('profile');
     } catch (error) {
       if (generation === revision) {
@@ -172,8 +213,8 @@ for (const button of dialog.querySelectorAll('[data-switch]')) button.addEventLi
 dialog.addEventListener('close', () => {
   dialog.querySelectorAll('input[type=password]').forEach(input => { input.value = ''; });
 });
-$('#use-profile').addEventListener('click', () => fillProfile(true));
-window.addEventListener('fiche:reset', () => fillProfile());
+$('#use-profile').addEventListener('click', () => fillProfile(true, true));
+window.addEventListener('fiche:reset', () => fillProfile(false, true));
 
 $('#signup-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -240,14 +281,41 @@ $('#profile-form').addEventListener('submit', event => {
   const form = event.currentTarget;
   run(form, async () => {
     const generation = ++revision;
-    const saved = await profiles.save({ entreprise: form.elements.entreprise.value, equipe: form.elements.equipe.value });
+    const saved = await profiles.save({
+      entreprise: form.elements.entreprise.value,
+      equipe: form.elements.equipe.value,
+      default_moyens_presents: selectedValues(form, 'default_moyens_presents'),
+      default_moyens_a_prevoir: selectedValues(form, 'default_moyens_a_prevoir')
+    });
     if (generation !== revision) return;
     currentUser = saved.user;
     currentProfile = saved.profile;
     updateAccountUI();
     // Saving a profile deliberately updates this fiche's company/team only.
-    fillProfile(true);
-    message('Profil enregistré. Vos prochaines fiches seront préremplies.');
+    fillProfile(true, false);
+    message('Profil enregistré. Vos prochaines fiches utiliseront aussi vos options par défaut.');
+  });
+});
+$('#apply-default-options').addEventListener('click', () => {
+  applyDefaultOptions(true);
+  message('Vos options par défaut ont été appliquées à la fiche en cours.');
+});
+$('#reset-default-options').addEventListener('click', () => {
+  const form = $('#profile-form');
+  run(form, async () => {
+    if (!currentProfile) return;
+    const generation = ++revision;
+    const saved = await profiles.save({
+      entreprise: currentProfile.entreprise,
+      equipe: currentProfile.equipe,
+      default_moyens_presents: [],
+      default_moyens_a_prevoir: []
+    });
+    if (generation !== revision) return;
+    currentUser = saved.user;
+    currentProfile = saved.profile;
+    updateAccountUI();
+    message('Options par défaut réinitialisées. Les prochaines fiches repartiront sans moyen précoché.');
   });
 });
 $('#signout').addEventListener('click', async () => {
