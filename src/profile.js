@@ -1,10 +1,23 @@
 /** Explicit allowlist: no field from an intervention is ever sent to Supabase. */
+export const DEFAULT_PRESENT_OPTIONS = Object.freeze(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']);
+export const DEFAULT_FUTURE_OPTIONS = Object.freeze(['f0', 'f1', 'f2', 'f3', 'f4']);
+
+function normalizeOptionList(input, allowed) {
+  if (!Array.isArray(input)) return [];
+  return [...new Set(input.map(value => String(value)).filter(value => allowed.includes(value)))];
+}
+
 export function normalizeProfile(input) {
   const entreprise = String(input?.entreprise ?? '').trim();
   const equipe = String(input?.equipe ?? '').trim();
   if (!entreprise || entreprise.length > 30) throw new Error('Indiquez une entreprise de 1 à 30 caractères.');
   if (!equipe || equipe.length > 25) throw new Error('Indiquez une équipe de 1 à 25 caractères.');
-  return { entreprise, equipe };
+  return {
+    entreprise,
+    equipe,
+    default_moyens_presents: normalizeOptionList(input?.default_moyens_presents, DEFAULT_PRESENT_OPTIONS),
+    default_moyens_a_prevoir: normalizeOptionList(input?.default_moyens_a_prevoir, DEFAULT_FUTURE_OPTIONS)
+  };
 }
 
 export function configIsReady(config) {
@@ -19,7 +32,8 @@ export function configIsReady(config) {
 
 export function profileFieldsToFill(current, profile, overwrite = false) {
   const clean = normalizeProfile(profile);
-  return Object.fromEntries(Object.entries(clean).filter(([key]) => overwrite || !String(current[key] || '').trim()));
+  const textFields = { entreprise: clean.entreprise, equipe: clean.equipe };
+  return Object.fromEntries(Object.entries(textFields).filter(([key]) => overwrite || !String(current[key] || '').trim()));
 }
 
 export function createProfileStore(client) {
@@ -32,7 +46,9 @@ export function createProfileStore(client) {
   return {
     async load() {
       const user = await verifiedUser();
-      const { data, error } = await client.from('profiles').select('entreprise,equipe').eq('id', user.id).maybeSingle();
+      const { data, error } = await client.from('profiles')
+        .select('entreprise,equipe,default_moyens_presents,default_moyens_a_prevoir')
+        .eq('id', user.id).maybeSingle();
       if (error) throw error;
       return { user, profile: data };
     },
@@ -40,7 +56,7 @@ export function createProfileStore(client) {
       const clean = normalizeProfile(input);
       const user = await verifiedUser();
       const { data, error } = await client.from('profiles').upsert({ id: user.id, ...clean }, { onConflict: 'id' })
-        .select('entreprise,equipe').single();
+        .select('entreprise,equipe,default_moyens_presents,default_moyens_a_prevoir').single();
       if (error) throw error;
       return { user, profile: data };
     }
