@@ -4,7 +4,19 @@ begin;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   entreprise text not null check (char_length(btrim(entreprise)) between 1 and 30),
-  equipe text not null check (char_length(btrim(equipe)) between 1 and 25)
+  equipe text not null check (char_length(btrim(equipe)) between 1 and 25),
+  default_moyens_presents jsonb not null default '[]'::jsonb,
+  default_moyens_a_prevoir jsonb not null default '[]'::jsonb,
+  constraint profiles_default_moyens_presents_check check (
+    jsonb_typeof(default_moyens_presents) = 'array'
+    and jsonb_array_length(default_moyens_presents) <= 6
+    and default_moyens_presents <@ '["m0","m1","m2","m3","m4","m5"]'::jsonb
+  ),
+  constraint profiles_default_moyens_a_prevoir_check check (
+    jsonb_typeof(default_moyens_a_prevoir) = 'array'
+    and jsonb_array_length(default_moyens_a_prevoir) <= 5
+    and default_moyens_a_prevoir <@ '["f0","f1","f2","f3","f4"]'::jsonb
+  )
 );
 alter table public.profiles enable row level security;
 revoke all on public.profiles from public, anon, authenticated;
